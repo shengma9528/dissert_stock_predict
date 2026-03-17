@@ -397,11 +397,6 @@ class VMDStrategyThreePredictor:
             # print(f"k: {k}, X_tr.shape: {X_tr.shape}, y_tr.shape: {y_tr.shape}, X_v.shape: {X_v.shape}, y_v.shape: {y_v.shape}")
 
             if k in self.trend_imfs:
-                model = LinearRegression()
-                model.fit(X_tr, y_tr)
-                self.trained_models[k] = model
-
-            elif k in self.mid_imfs:
                 X_lstm = np.stack((X_tr, V_train), axis=-1)
                 X_v_lstm = np.stack((X_v, V_val), axis=-1)
 
@@ -416,10 +411,6 @@ class VMDStrategyThreePredictor:
 
                 model = self._get_dl_model(best_h1, best_h2, best_lr)
                 model.fit(X_lstm, y_tr, epochs=best_epochs, batch_size=best_batch_size, verbose=0, validation_data=(X_v_lstm, y_v), callbacks=[early_stopping])
-                self.trained_models[k] = model
-            elif k in self.noise_imfs:
-                model = self._get_ml_model(n_estimators=n_estimators)
-                model.fit(X_tr, y_tr)
                 self.trained_models[k] = model
         
         if self.enable_kelm:
@@ -473,13 +464,9 @@ class VMDStrategyThreePredictor:
             X_t, y_t = self._get_Y(X_test, k, return_y=True)
             pred = None
             if k in self.trend_imfs:
-                pred = self.trained_models[k].predict(X_t)
-            elif k in self.mid_imfs:
                 # print(f"k: {k}  predict_test_data X_t: {X_t.shape}  v_test: {v_test.shape} ")
                 X_input = np.stack((X_t, v_test), axis=-1)
                 pred = self.trained_models[k].predict(X_input, verbose=0)
-            elif k in self.noise_imfs:
-                pred = self.trained_models[k].predict(X_t)
             
             if pred is not None:
                 pred = pred.reshape(-1, 1)
@@ -556,8 +543,8 @@ if __name__ == "__main__":
                 time_step=time_step, 
                 rf_estimator=rf_estimator, 
                 merged_K=3,                         
-                trend_imfs=[],
-                mid_imfs=[0],
+                trend_imfs=[0],
+                mid_imfs=[],
                 noise_imfs=[]
             )
         predictor.run_multi_trend_prediction()
