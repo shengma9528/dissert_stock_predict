@@ -262,13 +262,16 @@ class VMDStrategyThreePredictor:
             V_train = loaded['V_train']
             V_val   = loaded['V_val']
             V_test  = loaded['V_test']
+
+            self.V_tr_v_data = loaded['V_tr_v_data']
+            self.X_tr_v_data = loaded['X_tr_v_data']
+            self.scalers_tr_v_min = loaded['scalers_tr_v_min'] 
+            self.scalers_tr_v_max = loaded['scalers_tr_v_max']
+            self.real_tr_v_data = loaded['real_tr_v_data']
             
             # 恢复类的全局(self)变量
-            self.scalers_val_min = loaded['scalers_val_min']
-            self.scalers_val_max = loaded['scalers_val_max']
             self.scalers_test_min = loaded['scalers_test_min']
             self.scalers_test_max = loaded['scalers_test_max']
-            self.real_val_data   = loaded['real_val_data']
             self.real_test_data   = loaded['real_test_data']
             
             print(f"✅ 从缓存加载成功！X_train 形状: {X_train.shape}")
@@ -281,12 +284,16 @@ class VMDStrategyThreePredictor:
                 cache_path,
                 X_train=X_train, X_val=X_val, X_test=X_test,
                 V_train=V_train, V_val=V_val, V_test=V_test,
-                scalers_val_min=self.scalers_val_min,
-                scalers_val_max=self.scalers_val_max,
+
                 scalers_test_min=self.scalers_test_min,
                 scalers_test_max=self.scalers_test_max,
-                real_val_data=self.real_val_data,
-                real_test_data=self.real_test_data
+                real_test_data=self.real_test_data,
+
+                V_tr_v_data=self.V_tr_v_data,
+                X_tr_v_data=self.X_tr_v_data,
+                scalers_tr_v_min=self.scalers_tr_v_min, 
+                scalers_tr_v_max=self.scalers_tr_v_max,
+                real_tr_v_data=self.real_tr_v_data
             )
             # 缓存写入成功！后续运行将秒进模型训练阶段
         return X_train, X_val, X_test, V_train, V_val, V_test
