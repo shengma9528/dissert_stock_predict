@@ -479,7 +479,7 @@ class VMDStrategyThreePredictor:
 
             error_train = tr_v_data - preds_real
             # X_tr_v_data = self.X_tr_v_data[:-1, :]
-            X_v_slice = X_val[:-1, :, :] 
+            X_v_slice = self.X_tr_v_data[:-1, :, :] 
             X_v_data = X_v_slice.reshape(X_v_slice.shape[0], -1)
 
             self.kelm_model = KELM(C=100, gamma=0.1)
