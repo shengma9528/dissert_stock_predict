@@ -377,7 +377,7 @@ class VMDStrategyThreePredictor:
         X_tr = X_tr[:-1, :]
         return X_tr, y_tr
 
-    def _train_models(self, X_train, X_val, V_train, V_val, dl_pool_size=10, dl_max_iter=10, n_estimators=50):
+    def _train_models(self, X_train, X_val, V_train, V_val, dl_pool_size=8, dl_max_iter=8, n_estimators=50):
         self.trained_models = {}
         V_train = V_train[:-1, -1, :]
         V_val = V_val[:-1, -1, :]
@@ -416,7 +416,9 @@ class VMDStrategyThreePredictor:
                         temp_model = self._get_dl_model(h1, h2, lr)
                         temp_model.fit(t_X_t, t_y_t, epochs=epochs, batch_size=batch_size, verbose=0)
                         preds = temp_model.predict(t_X_v, verbose=0)
-                        return mean_squared_error(t_y_v, preds)
+                        mse = mean_squared_error(t_y_v, preds)
+                        print(f"dbo mse: {mse} h1={h1}, h2={h2}, lr={lr:.5f}, epochs={epochs}, batch_size={batch_size}")
+                        return mse
                     
                     lb=[16, 16, 0.0001, 5, 10]
                     ub=[128, 128, 0.01, 100, 100]
