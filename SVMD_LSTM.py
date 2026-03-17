@@ -3,6 +3,7 @@ import pandas as pd
 import yfinance as yf
 import matplotlib.pyplot as plt
 import os
+import time
 import warnings
 from datetime import datetime
 from vmdpy import VMD
@@ -40,8 +41,6 @@ CACHE_DIR = "data/cache"
 # LOG_FILENAME = f"./report_SMVD_LSTM_20.txt"
 # FINANCE_DIR = "./"
 
-ENABLE_KELM = True
-ENABLE_DBO = False
 
 # ================= SVMD =================
 class SVMD:
@@ -124,7 +123,7 @@ class VMDStrategyThreePredictor:
     def __init__(self, 
                 ticker="AAPL", start_date="2010-01-01", end_date="2025-01-01",
                 K=8, alpha=2000, train_size_ratio=0.75, val_size_ratio=0.15, time_step=30, rf_estimator=60,
-                 show_plt=False, kl_flag=0, km_flag=0,
+                 show_plt=False, kl_flag=0, km_flag=0, enable_dbo=0, enable_kelm=True,
                  merged_K=8, trend_imfs=None, mid_imfs=None, noise_imfs=None):
         self.ticker = ticker
         self.start_date = start_date
@@ -132,10 +131,12 @@ class VMDStrategyThreePredictor:
         self.K = K; 
         self.kl_flag = kl_flag
         self.km_flag = km_flag
+        self.enable_dbo = enable_dbo
+        self.enable_kelm = enable_kelm
         self.merged_K = merged_K
         self.trend_imfs = trend_imfs if trend_imfs is not None else [0]
-        self.mid_imfs   = mid_imfs   if mid_imfs   is not None else [1, 2, 3, 4, 5, 6]
-        self.noise_imfs = noise_imfs if noise_imfs is not None else [7]
+        self.mid_imfs   = mid_imfs   if mid_imfs   is not None else [1, 2, 3]
+        self.noise_imfs = noise_imfs if noise_imfs is not None else [4, 5, 6, 7]
         self.alpha = alpha; 
         self.train_size_ratio = train_size_ratio
         self.val_size_ratio = val_size_ratio
@@ -412,8 +413,9 @@ class VMDStrategyThreePredictor:
                     restore_best_weights=True  # 核心设置：训练停止后，自动将模型权重回滚到历史表现最好的一轮
                 )
 
-                if ENABLE_DBO:
+                if self.enable_dbo == 1:
                     print(f"🔄 [IMF-{k}] 开始使用 DBO 优化 LSTM 参数...")
+                    start_time = time.time()
                     def lstm_objective(x):
                         h1, h2, lr, epochs, batch_size = int(x[0]), int(x[1]), x[2], int(x[3]), int(x[4])
                         split_idx = int(len(X_lstm) * 0.8)
@@ -424,15 +426,63 @@ class VMDStrategyThreePredictor:
                         temp_model.fit(t_X_t, t_y_t, epochs=epochs, batch_size=batch_size, verbose=0)
                         preds = temp_model.predict(t_X_v, verbose=0)
                         mse = mean_squared_error(t_y_v, preds)
-                        print(f"dbo mse: {mse} h1={h1}, h2={h2}, lr={lr:.5f}, epochs={epochs}, batch_size={batch_size}")
+                        R2 = r2_score(t_y_v, preds)
+                        print(f"dbo mse: {mse:.5f} R2: {R2:.5f} h1={h1}, h2={h2}, lr={lr:.5f}, epochs={epochs}, batch_size={batch_size}")
                         return mse
                     
                     lb=[16, 16, 0.0001, 5, 10]
                     ub=[128, 128, 0.01, 100, 100]
                     dbo_lstm = DBO(obj_func=lstm_objective, dim=len(lb), pop_size=dl_pool_size, max_iter=dl_max_iter, lb=lb, ub=ub)
                     best_lstm_params = dbo_lstm.optimize()
+                    opt_time = time.time() - start_time
+
                     best_h1, best_h2, best_lr, best_epochs, best_batch_size = int(best_lstm_params[0]), int(best_lstm_params[1]), best_lstm_params[2], int(best_lstm_params[3]), int(best_lstm_params[4])
-                    print(f"✅ DBO 优化 LSTM 完成: h1={best_h1}, h2={best_h2}, lr={best_lr:.5f}, epochs={best_epochs}, batch_size={best_batch_size}")
+                    report = f"✅ DBO 优化 LSTM 完成: 耗时 {opt_time:.2f}s,  h1={best_h1}, h2={best_h2}, lr={best_lr:.5f}, epochs={best_epochs}, batch_size={best_batch_size}"
+                    print(report)
+                    with open(LOG_FILENAME, 'a', encoding='utf-8') as f:
+                        f.write(report + "\n")
+                elif self.enable_dbo == 2:
+                    # 替换为 Grid Search 逻辑
+                    print(f"🔄 [IMF-{k}] 开始使用 Grid Search 优化 LSTM 参数...")
+                    start_time = time.time()
+                    
+                    # 定义网格搜索空间 (为了公平，范围应与 DBO 的 lb/ub 对应，但网格点不宜过多)
+                    grid_h1 = [32, 64, 128]
+                    grid_h2 = [16, 32, 64]
+                    grid_lr = [0.001, 0.005]
+                    grid_epochs = [10, 50]
+                    grid_batch = [16, 32]
+                    
+                    best_mse = float('inf')
+                    best_params = (64, 32, 0.005, 10, 32) # 默认兜底
+                    
+                    split_idx = int(len(X_lstm) * 0.8)
+                    t_X_t, t_y_t = X_lstm[:split_idx], y_tr[:split_idx]
+                    t_X_v, t_y_v = X_lstm[split_idx:], y_tr[split_idx:]
+                    
+                    # 暴力遍历网格
+                    for h1 in grid_h1:
+                        for h2 in grid_h2:
+                            for lr in grid_lr:
+                                for epochs in grid_epochs:
+                                    for batch in grid_batch:
+                                        K.clear_session()
+                                        temp_model = self._get_dl_model(h1, h2, lr)
+                                        temp_model.fit(t_X_t, t_y_t, epochs=epochs, batch_size=batch, verbose=0)
+                                        preds = temp_model.predict(t_X_v, verbose=0)
+                                        mse = mean_squared_error(t_y_v, preds)
+                                        R2 = r2_score(t_y_v, preds)
+                                        if mse < best_mse:
+                                            best_mse = mse
+                                            best_params = (h1, h2, lr, epochs, batch)
+                                        print(f"grid mse: {mse:.5f} R2: {R2:.5f} h1={h1}, h2={h2}, lr={lr:.5f}, epochs={epochs}, batch_size={batch}")
+                    
+                    opt_time = time.time() - start_time
+                    best_h1, best_h2, best_lr, best_epochs, best_batch_size = best_params
+                    report = f"✅ Grid Search 优化完成: 耗时 {opt_time:.2f}s | h1={best_h1}, h2={best_h2}, lr={best_lr:.5f}, epochs={best_epochs}, batch_size={best_batch_size}"
+                    print(report)
+                    with open(LOG_FILENAME, 'a', encoding='utf-8') as f:
+                        f.write(report + "\n")
                 else:
                     best_h1, best_h2, best_lr, best_epochs, best_batch_size = 64, 32, 0.005, 10, 32
 
@@ -444,7 +494,7 @@ class VMDStrategyThreePredictor:
                 model.fit(X_tr, y_tr)
                 self.trained_models[k] = model
         
-        if ENABLE_KELM:
+        if self.enable_kelm:
             preds = []
             V_val = self.V_tr_v_data[:-1, -1, :]
             for k in range(self.merged_K):
@@ -515,7 +565,7 @@ class VMDStrategyThreePredictor:
         preds_sum = np.sum(preds, axis=0) # 先只加总 IMF 分量
         preds_real = self._row_inverse_normalize(preds_sum, t_min, t_max) # 先还原到真实价格空间
         
-        if ENABLE_KELM:
+        if self.enable_kelm:
             X_test_slice = X_test[:-1, :, :]
             X_kelm_test = X_test_slice.reshape(X_test_slice.shape[0], -1)
             residuals_pred = self.kelm_model.predict(X_kelm_test).reshape(-1, 1)
@@ -566,6 +616,7 @@ if __name__ == "__main__":
                 ticker=ticker, 
                 start_date="2013-01-01", 
                 end_date="2024-01-01",
+                enable_dbo=1,
                 K=k, 
                 kl_flag=kl_flag,
                 km_flag=km_flag,
