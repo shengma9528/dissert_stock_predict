@@ -14,9 +14,10 @@ from tensorflow.keras.layers import LSTM, Dense, Input, Conv1D, MaxPooling1D, Dr
 from tensorflow.keras.optimizers import Adam
 
 class SVMD:
-    def __init__(self, alpha=2000, tau=0, K=8, DC=0, init=1, tol=1e-7, stop_tol=1e-7):
+    def __init__(self, alpha=2000, tau=0, K=8, DC=0, init=1, tol=1e-7, stop_tol=1e-7, fix_K=False):
         self.alpha = alpha; self.tau = tau; self.K = K; self.DC = DC
         self.init = init; self.tol = tol; self.stop_tol = stop_tol
+        self.fix_K = fix_K
 
     def __call__(self, data):
         data = np.asarray(data).flatten()
@@ -29,8 +30,12 @@ class SVMD:
             if (np.var(residual) / original_var) < self.stop_tol:
                 break
             if k == self.K - 1:
-                u, _, omega = VMD(residual, self.alpha, self.tau, 1, self.DC, self.init, self.tol)
-                u_list.append(u[0]); omega_list.append(omega[-1, 0])
+                if self.fix_K:
+                    u_list.append(residual)
+                    omega_list.append(0.5)
+                else:
+                    u, _, omega = VMD(residual, self.alpha, self.tau, 1, self.DC, self.init, self.tol)
+                    u_list.append(u[0]); omega_list.append(omega[-1, 0])
             else:
                 u, _, omega = VMD(residual, self.alpha, self.tau, 2, self.DC, self.init, self.tol)
                 freqs = omega[-1, :]
@@ -39,6 +44,12 @@ class SVMD:
                 residual = residual - u[idx]
         if not u_list:
             u_list = [data]; omega_list = [0.0]
+
+        if self.fix_K:
+            while len(u_list) < self.K:
+                u_list.append(np.zeros_like(data))
+                omega_list.append(0.0)
+
         return np.array(u_list), None, np.array([omega_list])
 
 
@@ -214,99 +225,6 @@ class ComparePredictor:
 
         self._evaluate_metrics(y_test_real, preds_real, "CNN-LSTM (No Decomp)")
 
-
-    # 修复 1：数据准备阶段，直接对原始窗口进行 VMD 分解，避免 d_min 的累加效应
-    def prepare_svmd_data1(self, time_step=20, K=3):
-        if time_step % 2 == 1:
-            time_step += 1
-
-        total_samples = len(self.close_prices) - time_step
-        train_end = int(total_samples * 0.8)
-        val_end = int(total_samples * 0.9)
-
-        x_arr = []
-
-        for i in range(total_samples):
-            # 提取窗口数据 (需确保变成 1D 数组供 SVMD 使用)
-            datax  = self.close_prices[i : i + time_step].flatten()
-
-            # 直接对原始数据进行 VMD 分解
-            # 此时得到的 u 的真实加和就等于原始价格曲线
-            svmd  = SVMD(K)
-            u, _, omega = svmd(datax)
-            x_arr.append(u)
-
-        X = np.array(x_arr) # 形状: (total_samples, K, time_step)
-
-        X_train = X[:train_end, :, :]
-        X_val   = X[train_end:val_end, :, :]
-        X_test  = X[val_end:, :, :]
-
-        return X_train, None, X_val, None, X_test, None, None
-
-
-    def test_VMD_LSTM1(self, time_step=10):
-        K = 3
-        h1, h2, lr = 64, 32, 1e-3
-
-        X_train, _, X_val, _, X_test, _, _ = self.prepare_svmd_data1(time_step, K)
-
-        preds = []
-
-        for i in range(K):
-            model = Sequential([
-                Input(shape=(time_step - 1, 1)),
-                Bidirectional(LSTM(int(h1), activation='tanh', return_sequences=True)),
-                Dropout(0.2),
-                Bidirectional(LSTM(int(h2), activation='tanh')),
-                Dropout(0.2),
-                Dense(1)
-            ])
-            model.compile(optimizer=Adam(learning_rate=lr), loss='mse')
-
-            # === 训练集处理 ===
-            # 1. 提取当前 IMF 并进行行归一化
-            X_tr_norm, tr_min, tr_max = self._row_normalize(X_train[:, i, :])
-            # 2. 修复 3：直接在窗口内部切分，前 time_step-1 步为特征，最后 1 步为标签
-            X_tr = X_tr_norm[:, :-1].reshape(-1, time_step - 1, 1)
-            y_tr = X_tr_norm[:, -1:]
-
-            # === 验证集处理 ===
-            X_v_norm, v_min, v_max = self._row_normalize(X_val[:, i, :])
-            X_v = X_v_norm[:, :-1].reshape(-1, time_step - 1, 1)
-            y_v = X_v_norm[:, -1:]
-
-            # === 测试集处理 ===
-            X_t_norm, t_min, t_max = self._row_normalize(X_test[:, i, :])
-            X_t = X_t_norm[:, :-1].reshape(-1, time_step - 1, 1)
-            y_t = X_t_norm[:, -1:] # 模型评估可用，但最终我们要用真实价格评估
-
-            # 训练模型
-            model.fit(X_tr, y_tr, epochs=10, batch_size=32, verbose=0,
-                    validation_data=(X_v, y_v))
-
-            # 预测并反归一化
-            pred_norm = model.predict(X_t, verbose=0)
-
-            # 这里的 t_min, t_max 刚好是当前 IMF 测试集每行的极值，形状为 (N, 1)，完美对应
-            pred_real = self._row_inverse_normalize(pred_norm, t_min, t_max)
-            preds.append(pred_real)
-
-        # 汇总所有 IMF 的预测结果
-        preds = np.array(preds) # 形状: (K, num_test_samples, 1)
-        preds_real = np.sum(preds, axis=0)
-
-        # 修复 2：构建正确的真实评估标签
-        # X_test 包含了测试集的所有真实 IMF (未被扭曲的)。
-        # 我们将其在 K 维度求和，就能还原出真实的窗口序列，再取最后一步作为真实标签
-        # y_test_real = np.sum(X_test, axis=1)[:, -1:]
-        y_test_real = X_test[1:, -1, -1:]
-
-        result = self._evaluate_metrics(y_test_real, preds_real, "VMD-LSTM (Strict)")
-        print(result)
-
-
-
     def prepare_svmd_data(self, time_step=20, K=3):
         if time_step % 2 == 1:
             time_step += 1
@@ -434,10 +352,13 @@ class ComparePredictor:
 
         self._evaluate_metrics(real_test_data, preds_real, "VMD-LSTM (Strict)")
 
+    def test(self):
+        pass
+
 if __name__ == "__main__":
     predictor = ComparePredictor()
-    predictor.test_LSTM()
-    predictor.test_LightGBM()
-    predictor.test_CNN_LSTM()
+    # predictor.test_LSTM()
+    # predictor.test_LightGBM()
+    # predictor.test_CNN_LSTM()
     predictor.test_VMD_LSTM()
-    # predictor.prepare_svmd_data()
+    # predictor.test()
