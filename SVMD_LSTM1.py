@@ -417,7 +417,7 @@ class VMDStrategyThreePredictor:
                 model = self._get_dl_model(best_h1, best_h2, best_lr)
                 model.fit(X_lstm, y_tr, epochs=best_epochs, batch_size=best_batch_size, verbose=0, validation_data=(X_v_lstm, y_v), callbacks=[early_stopping])
                 self.trained_models[k] = model
-            else:
+            elif k in self.noise_imfs:
                 model = self._get_ml_model(n_estimators=n_estimators)
                 model.fit(X_tr, y_tr)
                 self.trained_models[k] = model
@@ -427,23 +427,25 @@ class VMDStrategyThreePredictor:
             V_val = self.V_tr_v_data[:-1, -1, :]
             for k in range(self.merged_K):
                 X_v, y_v = self._get_Y(self.X_tr_v_data, k, return_y=True)
-                
+                pred = None
                 if k in self.trend_imfs:
                     pred = self.trained_models[k].predict(X_v)
                 elif k in self.mid_imfs:
                     # print(f"k: {k}, X.shape: {X.shape}, v_tr_v_data.shape: {v_tr_v_data.shape}")
                     X_V_combined = np.stack((X_v, V_val), axis=-1)
                     pred = self.trained_models[k].predict(X_V_combined)
-                else:
+                elif k in self.noise_imfs:
                     pred = self.trained_models[k].predict(X_v)
-                pred = pred.reshape(-1, 1)
-                preds.append(pred)
+                
+                if pred is not None:
+                    pred = pred.reshape(-1, 1)
+                    preds.append(pred)
 
-                component_r2 = r2_score(y_v, pred)
-                reprot = f"val IMF-{k}: R2 = {component_r2:.4f}"
-                print(reprot)
-                with open(LOG_FILENAME, 'a', encoding='utf-8') as f:
-                    f.write(reprot + "\n")
+                    component_r2 = r2_score(y_v, pred)
+                    reprot = f"val IMF-{k}: R2 = {component_r2:.4f}"
+                    print(reprot)
+                    with open(LOG_FILENAME, 'a', encoding='utf-8') as f:
+                        f.write(reprot + "\n")
             
             t_min = self.scalers_tr_v_min[1:, :]
             t_max = self.scalers_tr_v_max[1:, :]
@@ -469,23 +471,25 @@ class VMDStrategyThreePredictor:
         for k in range(self.merged_K):
             # print(f"k: {k}  predict_test_data X_test: {X_test.shape}")
             X_t, y_t = self._get_Y(X_test, k, return_y=True)
-
+            pred = None
             if k in self.trend_imfs:
                 pred = self.trained_models[k].predict(X_t)
             elif k in self.mid_imfs:
                 # print(f"k: {k}  predict_test_data X_t: {X_t.shape}  v_test: {v_test.shape} ")
                 X_input = np.stack((X_t, v_test), axis=-1)
                 pred = self.trained_models[k].predict(X_input, verbose=0)
-            else:
+            elif k in self.noise_imfs:
                 pred = self.trained_models[k].predict(X_t)
-            pred = pred.reshape(-1, 1)
-            preds.append(pred)
+            
+            if pred is not None:
+                pred = pred.reshape(-1, 1)
+                preds.append(pred)
 
-            component_r2 = r2_score(y_t, pred)
-            reprot = f"test IMF-{k}: R2 = {component_r2:.4f}"
-            print(reprot)
-            with open(LOG_FILENAME, 'a', encoding='utf-8') as f:
-                f.write(reprot + "\n")
+                component_r2 = r2_score(y_t, pred)
+                reprot = f"test IMF-{k}: R2 = {component_r2:.4f}"
+                print(reprot)
+                with open(LOG_FILENAME, 'a', encoding='utf-8') as f:
+                    f.write(reprot + "\n")
         
         t_min = self.scalers_test_min[1:, :]
         t_max = self.scalers_test_max[1:, :]
@@ -538,13 +542,14 @@ if __name__ == "__main__":
         time_step = 15
         rf_estimator = 100
         kl_flag = 2
-        km_flag = 3
+        km_flag = 2
 
         predictor = VMDStrategyThreePredictor( 
                 ticker=ticker, 
                 start_date="2013-01-01", 
                 end_date="2024-01-01",
                 enable_dbo=1,
+                enable_kelm=True,
                 K=k, 
                 kl_flag=kl_flag,
                 km_flag=km_flag,
@@ -553,7 +558,7 @@ if __name__ == "__main__":
                 merged_K=3,                         
                 trend_imfs=[],
                 mid_imfs=[0],
-                noise_imfs=[1, 2]
+                noise_imfs=[]
             )
         predictor.run_multi_trend_prediction()
     else:
