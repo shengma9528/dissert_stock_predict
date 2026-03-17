@@ -4,7 +4,7 @@ import torch
 import os
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score, mean_absolute_percentage_error, root_mean_squared_error
 from lightgbm import LGBMClassifier, LGBMRegressor
 from sklearn.preprocessing import MinMaxScaler
 from vmdpy import VMD
