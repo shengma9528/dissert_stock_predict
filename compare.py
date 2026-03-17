@@ -357,8 +357,8 @@ class ComparePredictor:
 
 if __name__ == "__main__":
     predictor = ComparePredictor()
-    # predictor.test_LSTM()
-    # predictor.test_LightGBM()
-    # predictor.test_CNN_LSTM()
+    predictor.test_LSTM()
+    predictor.test_LightGBM()
+    predictor.test_CNN_LSTM()
     predictor.test_VMD_LSTM()
     # predictor.test()
