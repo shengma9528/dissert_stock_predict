@@ -327,8 +327,10 @@ class VMDStrategyThreePredictor:
         V_train = v_arr[:train_end, :, :] 
         V_val   = v_arr[train_end:val_end, :, :] 
         V_test  = v_arr[val_end:, :, :]
-        self.scalers_val_min = scalers_min[train_end:val_end, :] 
-        self.scalers_val_max = scalers_max[train_end:val_end, :]
+        self.V_tr_v_data = v_arr[:val_end, :, :]
+        self.X_tr_v_data = x_arr[:val_end, :, :]
+        self.scalers_tr_v_min = scalers_min[:val_end, :] 
+        self.scalers_tr_v_max = scalers_max[:val_end, :]
         self.scalers_test_min = scalers_min[val_end:, :] 
         self.scalers_test_max = scalers_max[val_end:, :]
         # print(f"_prepare_data X_train.shape: {X_train.shape}, X_val.shape: {X_val.shape}, X_test: {X_test.shape}, V_train.shape: {V_train.shape}, V_val.shape: {V_val.shape}, V_test: {V_test.shape}")
@@ -336,7 +338,7 @@ class VMDStrategyThreePredictor:
         # 用于测试
         self.real_test_data = real_data[val_end:]
         # 用于验证集
-        self.real_val_data = real_data[train_end:val_end]
+        self.real_tr_v_data = real_data[:val_end]
 
         return X_train, X_val, X_test, V_train, V_val, V_test
         
@@ -435,8 +437,9 @@ class VMDStrategyThreePredictor:
         
         if ENABLE_KELM:
             preds = []
+            V_val = self.V_tr_v_data[:-1, -1, :]
             for k in range(self.merged_K):
-                X_v, y_v = self._get_Y(X_val, k, return_y=True)
+                X_v, y_v = self._get_Y(self.X_tr_v_data, k, return_y=True)
                 
                 if k in self.trend_imfs:
                     pred = self.trained_models[k].predict(X_v)
@@ -455,9 +458,9 @@ class VMDStrategyThreePredictor:
                 with open(LOG_FILENAME, 'a', encoding='utf-8') as f:
                     f.write(reprot + "\n")
             
-            t_min = self.scalers_val_min[1:, :]
-            t_max = self.scalers_val_max[1:, :]
-            tr_v_data = self.real_val_data[1:, :]
+            t_min = self.scalers_tr_v_min[1:, :]
+            t_max = self.scalers_tr_v_max[1:, :]
+            tr_v_data = self.real_tr_v_data[1:, :]
             # print("real_test_data:", real_test_data.shape)
 
             preds = np.array(preds)
